@@ -10,7 +10,7 @@ const KB = { keyboard: [
   ["\u{1F195} Recent", "\u{1F6A9} Flagged"],
   ["\u{1F4DA} Subjects", "\u{1F648} Absent"],
   ["\u{1F4C5} Weekly", "\u2753 Menu"],
-  ["\u{1F4F8} Photos"]
+  ["\u{1F4F8} Photos", "\u{1F6AB} No photo"]
 ], resize_keyboard: true, is_persistent: true };
 const LIVE_FRESH = 75e3, HOLD_MS = 2 * 864e5, FULL_Q = 30;
 
@@ -269,7 +269,16 @@ function helpText() {
     "\u{1F4F8} <b>photos</b> \u2014 HD photo ka status\n" +
     "\u{1F4F8} <b>photo rahul</b> \u2014 us student ki HD photo\n" +
     "\u{1F4F8} <b>photos class 5</b> \u2014 us class ki saari HD photo\n" +
-    "\u{1F4F8} <b>allphotos</b> \u2014 sabki HD photo (15 album ek baar mein, phir allphotos 2)";
+    "\u{1F4F8} <b>allphotos</b> \u2014 sabki HD photo (15 album ek baar mein, phir allphotos 2)\n\n" +
+    "<b>DP control</b> (dp = photo)\n" +
+    "\u{1F6AB} <b>no photo</b> / <b>no photo class 5</b> \u2014 jinki photo nahi\n" +
+    "\u{1F4CB} <b>photo list</b> / <b>photo list class 5</b> \u2014 saved naam\n" +
+    "\u{1F5D1} <b>del photo rahul</b> \u2014 ek photo hatao\n" +
+    "\u{1F5D1} <b>delete photo class 5 confirm</b> \u2014 poori class\n" +
+    "\u{1F5D1} <b>delete all photos confirm</b> \u2014 sab\n" +
+    "\u27A1\uFE0F <b>move rahul to 6</b> \u2014 class badlo\n" +
+    "\u270F\uFE0F <b>rename rahul to rahul kumar</b>\n" +
+    "\u{1F4CE} Photo par reply karke <b>Naam | class</b> likho = save/badal do";
 }
 
 // ---------- HD PHOTOS (site ne jo original Telegram ko bheji, uski file_id Firebase mein rakhi hai) ----------
@@ -306,6 +315,48 @@ function photoCmd(raw) {
   if ((m = /^(?:photos?|fotos?|pics?) (?:class |cls )?(\d{1,2})(?: (\d{1,2}))?$/.exec(t)) || (m = /^(?:class|cls) (\d{1,2}) (?:photos?|fotos?|pics?)(?: (\d{1,2}))?$/.exec(t))) return { t: "cls", c: String(Number(m[1])), page: Number(m[2]) || 1 };
   if ((m = /^(?:photo|foto|pic|photos)\s+(.+)$/i.exec(String(raw || "").trim()))) return { t: "one", q: m[1] };
   return null;
+}
+function dpCmd(raw) {
+  const t = String(raw || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim(); let m;
+  if ((m = /^(?:no ?photos?|missing|dp missing|photo missing)(?: (?:class |cls )?(\d{1,2}))?$/.exec(t))) return { t: "miss", c: m[1] ? String(Number(m[1])) : "" };
+  if ((m = /^(?:photo|dp) list(?: (?:class |cls )?(\d{1,2}))?$/.exec(t))) return { t: "list", c: m[1] ? String(Number(m[1])) : "" };
+  if ((m = /^(?:del|delete|remove|hata)(?: photo| dp| foto)? class (\d{1,2})( confirm)?$/.exec(t))) return { t: "delcls", c: String(Number(m[1])), ok: !!m[2] };
+  if (/^(?:del|delete|remove|hata) (?:all ?photos?|sab photos?)( confirm)?$/.test(t)) return { t: "delall", ok: / confirm$/.test(t) };
+  if ((m = /^(?:del|delete|remove|hata) (?:photo|dp|foto) (.+)$/.exec(t))) return { t: "del", q: m[1] };
+  if ((m = /^(?:move|class badlo|badlo) (?:photo |dp )?(.+?) (?:to|class) (\d{1,2})$/.exec(t))) return { t: "move", q: m[1], c: String(Number(m[2])) };
+  if ((m = /^rename (?:photo |dp )?(.+?) (?:to|as) (.+)$/.exec(t))) return { t: "rename", q: m[1], n: m[2] };
+  return null;
+}
+const pUrl = x => DB + "/testBotMeta/photos/" + encodeURIComponent(pKey(x.n, x.c)) + ".json";
+async function pDel(x) { const r = await fetch(pUrl(x), { method: "DELETE" }); if (!r.ok) throw new Error("firebase " + r.status); }
+async function pPut(x) { const r = await fetch(pUrl(x), { method: "PUT", body: JSON.stringify({ f: x.f, k: x.k, n: x.n, c: x.c, t: x.t || Date.now() }) }); if (!r.ok) throw new Error("firebase " + r.status); }
+const titleCase = s => s.replace(/\b[a-z]/g, c => c.toUpperCase());
+async function doDp(env, chat, cmd) {
+  const say = t => tgSend(env, chat, t), all = await loadPhotos();
+  const find = q => { const n = nk(q), ex = all.filter(x => nk(x.n) === n); return ex.length ? ex : all.filter(x => nk(x.n).includes(n)); };
+  if (cmd.t === "miss" || cmd.t === "list") {
+    if (cmd.t === "list") {
+      const L = all.filter(x => !cmd.c || x.c === cmd.c);
+      if (!L.length) return say("\u{1F4F8} Koi HD photo saved nahi.");
+      const g = {}; L.forEach(x => (g[x.c] = g[x.c] || []).push(x));
+      return say(cap("\u{1F4F8} <b>HD photo list: " + L.length + "</b>", Object.keys(g).sort((a, b) => clsKey(a) - clsKey(b)).map(c => "<b>" + tgE(clsLabelEn(c)) + "</b> (" + g[c].length + "): " + g[c].map(x => tgE(x.n) + (x.k === "p" ? " \u{1F5BC}" : "")).join(", ")), "\u{1F5BC} = chhoti photo (HD file nahi)"));
+    }
+    const have = new Set(all.map(x => pKey(x.n, x.c))), seen = {};
+    (await loadResults()).forEach(r => { if (cmd.c && r.cls !== cmd.c) return; const k = pKey(r.name, r.cls); if (!have.has(k)) seen[k] = r; });
+    const g = {}; Object.values(seen).forEach(r => (g[r.cls] = g[r.cls] || []).push(r));
+    const ks = Object.keys(g).sort((a, b) => clsKey(a) - clsKey(b));
+    if (!ks.length) return say("✅ Sabki HD photo saved hai" + (cmd.c ? " (" + tgE(clsLabelEn(cmd.c)) + ")" : "") + ".");
+    return say(cap("\u{1F6AB} <b>HD photo nahi: " + Object.keys(seen).length + "</b>", ks.map(c => "<b>" + tgE(clsLabelEn(c)) + "</b>: " + g[c].map(r => tgE(r.name)).sort().join(", ")), "ℹ️ Photo bhejo caption <b>Naam | class</b> ke saath, ya photo par reply karke <b>Naam | class</b> likho."));
+  }
+  if (cmd.t === "delall") { if (!cmd.ok) return say("⚠️ Saari " + all.length + " HD photo hategi!\nPakka ho to likho: <b>delete all photos confirm</b>"); for (const x of all) await pDel(x); return say("\u{1F5D1} " + all.length + " HD photo hata di."); }
+  if (cmd.t === "delcls") { const L = all.filter(x => x.c === cmd.c); if (!L.length) return say("\u{1F4F8} " + tgE(clsLabelEn(cmd.c)) + " ki koi photo nahi."); if (!cmd.ok) return say("⚠️ " + tgE(clsLabelEn(cmd.c)) + " ki " + L.length + " photo hategi.\nPakka ho to likho: <b>delete photo class " + cmd.c + " confirm</b>"); for (const x of L) await pDel(x); return say("\u{1F5D1} " + tgE(clsLabelEn(cmd.c)) + " ki " + L.length + " photo hata di."); }
+  const L = find(cmd.q);
+  if (!L.length) return say("\u{1F4F8} \"" + tgE(cmd.q) + "\" naam ki photo nahi mili. <b>photo list</b> likho.");
+  if (L.length > 1) return say("\u{1F50D} " + L.length + " mile — poora naam likho:\n" + L.map(x => "• " + tgE(x.n) + " (" + tgE(clsLabelEn(x.c)) + ")").join("\n"));
+  const x = L[0];
+  if (cmd.t === "del") { await pDel(x); return say("\u{1F5D1} " + tgE(x.n) + " (" + tgE(clsLabelEn(x.c)) + ") ki HD photo hata di."); }
+  if (cmd.t === "move") { await pDel(x); await pPut({ ...x, c: cmd.c }); return say("✅ " + tgE(x.n) + ": " + tgE(clsLabelEn(x.c)) + " → " + tgE(clsLabelEn(cmd.c)) + " (photo move ho gayi)."); }
+  if (cmd.t === "rename") { const nn = titleCase(cmd.n.trim()); await pDel(x); await pPut({ ...x, n: nn }); return say("✅ Naam badla: " + tgE(x.n) + " → " + tgE(nn)); }
 }
 async function doPhotos(env, chat, cmd) {
   const say = t => tgSend(env, chat, t), all = await loadPhotos();
@@ -416,7 +467,17 @@ export default {
         await fetch(DB + "/testReplies/" + rt[1] + "/u" + u.update_id + ".json", { method: "PUT", body: JSON.stringify({ t: m.text.slice(0, 1000), at: (m.date || 0) * 1000 || Date.now() }) });
         return new Response("ok");
       }
-      if (m.text.length > 40) return new Response("ok");
+      // photo par reply karke "Naam | class" likha -> us photo ko save karo
+      const rp = m.reply_to_message;
+      if (rp && (rp.photo || rp.document) && /^.+?\s*[|,\/]\s*(?:class\s*)?\w{1,6}\s*$/i.test(m.text.trim())) {
+        const r = await savePhotoMsg(env, { ...rp, caption: m.text, forward_origin: null, forward_date: 0, date: m.date });
+        await tgSend(env, CHAT, r ? "\u2705 " + tgE(r.name) + " (" + tgE(clsLabelEn(r.cls)) + ") ki HD photo save ho gayi." : "\u26A0\uFE0F Format: <b>Naam | class</b>");
+        return new Response("ok");
+      }
+      if (m.text.length > 60) return new Response("ok");
+      m.text = m.text.replace(/^\s*dp\b/i, "photo").replace(/^\s*(del|delete|remove|hata)\s+dp\b/i, "$1 photo");
+      const dc = dpCmd(m.text);
+      if (dc) { await doDp(env, CHAT, dc); return new Response("ok"); }
       const pc = photoCmd(m.text);
       if (pc) { // photo bhejna lamba kaam hai: Telegram ko turant "ok", baaki peeche chalta rahe
         const job = doPhotos(env, CHAT, pc).catch(async () => { try { await tgSend(env, CHAT, "\u26A0\uFE0F Photo bhejte waqt gadbad hui, thodi der baad dobara try karo."); } catch (e) {} });
